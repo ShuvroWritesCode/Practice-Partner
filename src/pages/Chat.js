@@ -15,7 +15,7 @@ import {
   orderBy,
   getDocs,
 } from "firebase/firestore";
-import { getGeminiModel } from "../utils/gemini";
+import { getChatCompletion } from "../utils/openai";
 
 const Chat = ({ setIsSubscribed }) => {
   const containerRef = useRef(null);
@@ -23,10 +23,15 @@ const Chat = ({ setIsSubscribed }) => {
   const [inputMessage, setInputMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
-  const [chat, setChat] = useState(null);
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Add this new function to format the message content
+  const formatMessage = (content) => {
+    // Replace **text** or *text* patterns with bold text
+    return content.replace(/\*{1,2}(.*?)\*{1,2}/g, "<strong>$1</strong>");
+  };
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -79,19 +84,6 @@ const Chat = ({ setIsSubscribed }) => {
         }));
         setMessages(loadedMessages);
 
-        // Initialize Gemini chat with history
-        const model = getGeminiModel();
-        const newChat = model.startChat({
-          history: loadedMessages.map((msg) => ({
-            role: msg.role === "user" ? "user" : "model",
-            parts: [{ text: msg.content }],
-          })),
-          generationConfig: {
-            maxOutputTokens: 1000,
-          },
-        });
-        setChat(newChat);
-
         setPageLoading(false);
       } catch (error) {
         console.error("Error loading user data:", error);
@@ -111,21 +103,6 @@ const Chat = ({ setIsSubscribed }) => {
       if (!user) {
         toast.error("Please log in to continue");
         return;
-      }
-
-      if (!chat) {
-        // Reinitialize chat if it's not available
-        const model = getGeminiModel();
-        const newChat = model.startChat({
-          history: messages.map((msg) => ({
-            role: msg.role === "user" ? "user" : "model",
-            parts: [{ text: msg.content }],
-          })),
-          generationConfig: {
-            maxOutputTokens: 1000,
-          },
-        });
-        setChat(newChat);
       }
 
       // Get user document to check prompts
@@ -177,20 +154,13 @@ const Chat = ({ setIsSubscribed }) => {
         updatedAt: serverTimestamp(),
       });
 
-      // Get response from Gemini API
+      // Get response from OpenAI API
       try {
-        if (!chat) {
-          throw new Error("Chat not initialized");
-        }
+        const responseText = await getChatCompletion([
+          ...messages,
+          userMessage,
+        ]);
 
-        const result = await chat.sendMessage(trimmedMessage);
-        if (!result || !result.response) {
-          throw new Error("No response from AI");
-        }
-
-        // Get the response text from the first candidate
-        const responseText =
-          result.response.candidates[0].content.parts[0].text;
         if (!responseText) {
           throw new Error("Empty response from AI");
         }
@@ -287,9 +257,14 @@ const Chat = ({ setIsSubscribed }) => {
                     alt={message.role === "user" ? "User Logo" : "AI Logo"}
                     className="w-8 h-8 rounded-full mr-2"
                   />
-                  <div className="bg-transparent text-white p-2">
-                    {message.content}
-                  </div>
+                  <div
+                    className={`bg-transparent text-white p-2 ${
+                      message.role === "assistant" ? "whitespace-pre-wrap" : ""
+                    }`}
+                    dangerouslySetInnerHTML={{
+                      __html: formatMessage(message.content),
+                    }}
+                  />
                 </div>
               </div>
             ))}

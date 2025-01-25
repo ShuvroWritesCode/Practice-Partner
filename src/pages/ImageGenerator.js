@@ -1,12 +1,18 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import ResultCard from "../components/ResultCard";
 import { InputLabel, MenuItem, Select, TextField } from "@mui/material";
 import { Link, useNavigate } from "react-router-dom";
-import axios from "axios";
 import { FadeLoader } from "react-spinners";
 import { toast } from "react-toastify";
 import { auth, db } from "../utlis/firebase";
-import { doc, getDoc, updateDoc, increment } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  increment,
+  onSnapshot,
+} from "firebase/firestore";
+import { generateImages } from "../utils/openai";
 
 const override = {
   display: "block",
@@ -14,49 +20,98 @@ const override = {
   borderColor: "red",
 };
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-
 const ImageGenerator = ({ setIsSubscribed }) => {
   const [selectedValue, setSelectedValue] = useState("Generate from Text");
   const [selectedPrompt1, setSelectedPrompt1] = useState("");
   const [selectedPrompt2, setSelectedPrompt2] = useState("");
-  // const [selectedFile1, setSelectedFile1] = useState(null);
-
-  const [generatedImage, setGeneratedImage] = useState("");
-  const [generatedImage1, setGeneratedImage1] = useState("");
-  const [generatedImage2, setGeneratedImage2] = useState("");
-  const [generatedImage3, setGeneratedImage3] = useState("");
+  const [generatedImages, setGeneratedImages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [isUserSubscribed, setIsUserSubscribed] = useState(false);
   const navigate = useNavigate();
 
-  const handleGenerateImage = async () => {
+  // Listen to user's subscription status
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const userDocRef = doc(db, "users", user.uid);
+    const unsubscribe = onSnapshot(userDocRef, (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        setIsUserSubscribed(data.isSubscribed || false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleGenerateImage = async (e) => {
+    e.preventDefault();
+    if (!selectedPrompt1.trim()) {
+      toast.error("Please enter a prompt");
+      return;
+    }
+
     setLoading(true);
     try {
-      // Make a POST request to the backend API
+      const user = auth.currentUser;
+      if (!user) {
+        toast.error("Please log in to continue");
+        return;
+      }
 
-      // const prompt = JSON.stringify("prompt":selectedPrompt1)
-      // console.log(prompt)
-      const response = await axios.post(
-        `${BACKEND_URL}/generate-image`,
-        { prompt: selectedPrompt1 },
-        {
-          withCredentials: true,
-          credentials: "include",
-        }
-      );
+      const userDocRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userDocRef);
 
-      // Update state with the generated image URL
-      setGeneratedImage(response.data[0]);
-      setGeneratedImage1(response.data[1]);
-      setGeneratedImage2(response.data[2]);
-      setGeneratedImage3(response.data[3]);
+      if (!userDoc.exists()) {
+        toast.error("User data not found");
+        return;
+      }
+
+      // Check if user has reached the free limit
+      const currentPrompts = userDoc.data().imagePrompts || 0;
+      const isSubscribed = userDoc.data().isSubscribed || false;
+
+      if (currentPrompts >= 12 && !isSubscribed) {
+        setIsSubscribed(false);
+        toast.error(
+          "You've reached your free limit. Please subscribe to continue!"
+        );
+        navigate("/plan");
+        return;
+      }
+
+      // Show warning when approaching limit
+      if (!isSubscribed && currentPrompts === 9) {
+        toast.warning(
+          "You have 3 free prompts remaining. Subscribe to get unlimited access!"
+        );
+      } else if (!isSubscribed && currentPrompts === 11) {
+        toast.warning(
+          "This is your last free prompt. Subscribe to continue generating images!"
+        );
+      }
+
+      // Update the imagePrompts counter in Firestore
+      await updateDoc(userDocRef, {
+        imagePrompts: increment(1),
+      });
+
+      // Generate images using DALL-E 2
+      const fullPrompt = selectedPrompt2
+        ? `${selectedPrompt1}. Please avoid: ${selectedPrompt2}`
+        : selectedPrompt1;
+
+      const images = await generateImages(fullPrompt);
+      setGeneratedImages(images);
     } catch (error) {
-      console.error("Error generating image:", error);
-      if (error.response && error.response.status === 401) {
-        // Redirect to the plan page
+      console.error("Error:", error);
+      if (error.response?.status === 401) {
         setIsSubscribed(false);
         toast.error("Please subscribe to continue!");
         navigate("/plan");
+      } else {
+        toast.error("An error occurred while generating images");
       }
     } finally {
       setLoading(false);
@@ -75,36 +130,6 @@ const ImageGenerator = ({ setIsSubscribed }) => {
     setSelectedPrompt2(event.target.value);
   };
 
-  // const handleFileChange = (event, fileNumber) => {
-  //   const file = event.target.files[0];
-  //   setSelectedFile1(file);
-  // };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedPrompt1.trim()) return;
-
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        toast.error("Please log in to continue");
-        return;
-      }
-
-      const userDocRef = doc(db, "users", user.uid);
-
-      // Update the imagePrompts counter in Firestore
-      await updateDoc(userDocRef, {
-        imagePrompts: increment(1),
-      });
-
-      // Rest of your image generation logic...
-    } catch (error) {
-      console.error("Error:", error);
-      toast.error("An error occurred while processing your request");
-    }
-  };
-
   return (
     <div className="w-[80%]">
       <div className="flex md:flex-row md:mx-8 md:px-28 max-md:px-4 max-md:flex-col w-full">
@@ -120,11 +145,8 @@ const ImageGenerator = ({ setIsSubscribed }) => {
               <Select
                 value={selectedValue}
                 onChange={handleChange}
-                //   {(e) =>
-                // setUserData({ ...userData, industry: e.target.value })
-                //   }
                 displayEmpty
-                className="bg-white rounded-2xl w-full  pb-4 h-full"
+                className="bg-white rounded-2xl w-full pb-4 h-full"
                 variant="filled"
                 disableUnderline
                 defaultValue="Generate from Image"
@@ -142,40 +164,7 @@ const ImageGenerator = ({ setIsSubscribed }) => {
 
           {selectedValue === "Generate from Image" && (
             <div className="">
-              {/* <InputLabel
-                className="text-black font-bold"
-                style={{ fontWeight: 'bolder' }}
-              >
-                File Upload
-              </InputLabel>
-              <label htmlFor="uploadInput1" className="cursor-pointer">
-                <div className="bg-white h-[155px] mt-1 rounded-3xl hover:bg-gray-300 transition w-full flex flex-col items-center justify-center">
-                  {selectedFile1 ? (
-                    <img
-                      src={URL.createObjectURL(selectedFile1)}
-                      alt="Selected"
-                      className="w-full h-full object-contain rounded-lg"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center">
-                      <img src="upload.png" alt="Upload" className="mb-2" />
-                      <span className="text-logo mb-2">
-                        Click to upload a photo
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </label>
-
-              <input
-                id="uploadInput1"
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => handleFileChange(e)}
-              /> */}
-
-              {/* <h1>Coming Soon.....</h1> */}
+              <h1>Coming Soon.....</h1>
             </div>
           )}
           {selectedValue === "Generate from Text" && (
@@ -185,7 +174,6 @@ const ImageGenerator = ({ setIsSubscribed }) => {
                   What should the AI create?
                 </InputLabel>
                 <TextField
-                  //   value={userData["aboutAuthor"]}
                   value={selectedPrompt1}
                   multiline
                   rows={4}
@@ -197,7 +185,6 @@ const ImageGenerator = ({ setIsSubscribed }) => {
                     style: {
                       border: "none",
                       borderRadius: "0.75rem",
-                      // height: "2.5rem",
                       paddingBottom: "0.8rem",
                     },
                     disableUnderline: true,
@@ -209,7 +196,6 @@ const ImageGenerator = ({ setIsSubscribed }) => {
                   What shouldn't the AI create?
                 </InputLabel>
                 <TextField
-                  //   value={userData["aboutAuthor"]}
                   value={selectedPrompt2}
                   multiline
                   rows={4}
@@ -221,7 +207,6 @@ const ImageGenerator = ({ setIsSubscribed }) => {
                     style: {
                       border: "none",
                       borderRadius: "0.75rem",
-                      // height: "2.5rem",
                       paddingBottom: "0.8rem",
                     },
                     disableUnderline: true,
@@ -232,25 +217,32 @@ const ImageGenerator = ({ setIsSubscribed }) => {
           )}
           <div className="flex sm:justify-center">
             <button
-              type="submit"
               onClick={handleGenerateImage}
-              disabled={
-                (selectedValue === "Generate from Image" ? true : false) ||
-                loading
-              }
+              disabled={selectedValue === "Generate from Image" || loading}
               className={`bg-primary text-white font-bold text-sm rounded-2xl mt-4 px-4 py-4 w-full hover:bg-primary-light 
-        transition-colors duration-300 flex justify-center`}
+                transition-colors duration-300 flex justify-center`}
             >
-              {selectedValue === "Generate from Image"
-                ? "Coming Soon"
-                : "Generate"}
+              {selectedValue === "Generate from Image" ? (
+                "Coming Soon"
+              ) : loading ? (
+                <FadeLoader
+                  color={"#ffffff"}
+                  loading={loading}
+                  cssOverride={override}
+                  size={10}
+                  aria-label="Loading Spinner"
+                  data-testid="loader"
+                />
+              ) : (
+                "Generate"
+              )}
             </button>
           </div>
           {selectedValue === "Generate from Text" && (
             <Link
               to="/generate"
               className={`bg-transparent text-black font-semibold text-sm mt-2 px-4 py-4 w-full hover:bg-primary-light 
-        transition-colors duration-300 flex justify-start`}
+                transition-colors duration-300 flex justify-start`}
             >
               Advanced Mode
             </Link>
@@ -263,7 +255,6 @@ const ImageGenerator = ({ setIsSubscribed }) => {
             </h1>
             <div className="flex flex-col md:px-6 max-md:px-2">
               {loading ? (
-                // Render ClipLoader when loading is true
                 <div className="flex p-44 justify-center items-center w-full h-full">
                   <FadeLoader
                     color="#006590"
@@ -275,13 +266,11 @@ const ImageGenerator = ({ setIsSubscribed }) => {
                   />
                 </div>
               ) : (
-                generatedImage && (
-                  // Render the result cards when loading is false
+                generatedImages.length > 0 && (
                   <div className="grid md:grid-cols-2">
-                    <ResultCard imageUrl={generatedImage} />
-                    <ResultCard imageUrl={generatedImage1} />
-                    <ResultCard imageUrl={generatedImage2} />
-                    <ResultCard imageUrl={generatedImage3} />
+                    {generatedImages.map((imageUrl, index) => (
+                      <ResultCard key={index} imageUrl={imageUrl} />
+                    ))}
                   </div>
                 )
               )}

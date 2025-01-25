@@ -1,14 +1,62 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import { toast } from "react-toastify";
+import { detectAnyAdblocker } from "just-detect-adblock";
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
 function PlanInfoCard({ planFeatures, isLoggedIn }) {
   const [selectedPeriod, setSelectedPeriod] = useState("monthly");
   const [isLoading, setIsLoading] = useState(false);
+  const [isAdBlockerDetected, setIsAdBlockerDetected] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const checkForAdBlocker = async () => {
+      try {
+        console.log("Checking for ad blocker...");
+        const isDetected = await detectAnyAdblocker();
+        console.log("Ad blocker detected:", isDetected);
+        setIsAdBlockerDetected(isDetected);
+
+        if (isDetected) {
+          // Show a more prominent warning message
+          toast.error(
+            "⚠️ Ad Blocker Detected! Payment processing requires disabling your ad-blocker or whitelisting our website. Please update your settings to continue.",
+            {
+              position: "top-center",
+              autoClose: false,
+              hideProgressBar: false,
+              closeOnClick: false,
+              pauseOnHover: true,
+              draggable: false,
+              progress: undefined,
+              style: {
+                background: "#fee2e2",
+                color: "#991b1b",
+                fontSize: "1rem",
+                padding: "16px",
+                borderRadius: "8px",
+              },
+            }
+          );
+        }
+      } catch (error) {
+        console.error("Error detecting ad blocker:", error);
+        // Assume ad blocker is present if detection fails
+        setIsAdBlockerDetected(true);
+      }
+    };
+
+    // Run the check immediately
+    checkForAdBlocker();
+
+    // Also run it after a short delay to ensure proper detection
+    const timeoutId = setTimeout(checkForAdBlocker, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, []);
 
   const handleClick = (period) => {
     setSelectedPeriod(period);
@@ -30,6 +78,29 @@ function PlanInfoCard({ planFeatures, isLoggedIn }) {
   const handleSubscribe = async () => {
     if (!isLoggedIn) {
       navigate("/login");
+      return;
+    }
+
+    if (isAdBlockerDetected) {
+      // Show a more prominent subscription blocked message
+      toast.error(
+        "🛑 Subscription Blocked: Please disable your ad-blocker or whitelist our website first.",
+        {
+          position: "top-center",
+          autoClose: 5000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+          style: {
+            background: "#fee2e2",
+            color: "#991b1b",
+            fontSize: "1rem",
+            padding: "16px",
+            borderRadius: "8px",
+          },
+        }
+      );
       return;
     }
 
@@ -181,9 +252,9 @@ function PlanInfoCard({ planFeatures, isLoggedIn }) {
               </div>
               <button
                 onClick={handleSubscribe}
-                disabled={isLoading}
+                disabled={isLoading || isAdBlockerDetected}
                 className={`justify-center items-center px-16 py-5 mt-2 text-base font-bold whitespace-nowrap bg-sky-700 rounded-xl text-slate-50 max-md:px-5 ${
-                  isLoading
+                  isLoading || isAdBlockerDetected
                     ? "opacity-50 cursor-not-allowed"
                     : "hover:bg-sky-800"
                 }`}

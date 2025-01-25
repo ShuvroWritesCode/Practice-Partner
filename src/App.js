@@ -57,37 +57,30 @@ function App() {
           const isExpired = endDate && now > endDate;
 
           // Check if subscription is about to expire in 1 day
-          const oneDayInMs = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
           const timeUntilExpiration = endDate
             ? endDate.getTime() - now.getTime()
-            : 0;
-          const expiresInOneDay =
-            timeUntilExpiration > 0 && timeUntilExpiration <= oneDayInMs;
+            : null;
+          const isAboutToExpire =
+            timeUntilExpiration && timeUntilExpiration <= 24 * 60 * 60 * 1000;
 
           if (isExpired) {
-            // Update user document to reflect expired status
+            // Update user document when subscription expires
             await updateDoc(userRef, {
               isSubscribed: false,
-              status: "expired",
               freePrompts: 0,
+              status: "inactive",
+              updatedAt: now,
             });
+
             setIsSubscribed(false);
             toast.error(
               "Your subscription has expired. Please renew to continue accessing premium features."
             );
-          } else if (expiresInOneDay && userData.isSubscribed) {
-            // Show warning for subscription expiring soon
+          } else if (isAboutToExpire) {
             toast.warning(
               `Your subscription will expire in ${Math.ceil(
-                timeUntilExpiration / (1000 * 60 * 60)
-              )} hours. Please renew to avoid service interruption.`,
-              {
-                autoClose: false,
-                closeOnClick: false,
-                draggable: false,
-                closeButton: true,
-                onClick: () => navigate("/plan"),
-              }
+                timeUntilExpiration / (1000 * 60 * 60 * 24)
+              )} day(s). Renew now to maintain access!`
             );
             setIsSubscribed(userData.isSubscribed || false);
           } else {

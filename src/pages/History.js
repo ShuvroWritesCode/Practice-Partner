@@ -77,7 +77,7 @@ const History = () => {
   return (
     <div className="flex flex-col h-[calc(100vh-10rem)] mt-10 md:w-[90%] max-md:w-full">
       <div className="md:mx-12 max-md:mx-4 flex flex-col h-full">
-        <h2 className="text-3xl mb-6 text-white">Chat History</h2>
+        <h2 className="text-3xl mb-6 text-black">Chat History</h2>
         <div className="space-y-4 overflow-y-auto flex-1 pr-2">
           {sessions.map((session) => (
             <div
@@ -94,7 +94,7 @@ const History = () => {
             </div>
           ))}
           {sessions.length === 0 && (
-            <div className="text-center text-white py-8">
+            <div className="text-center text-black py-8">
               No chat history found
             </div>
           )}
