@@ -13,6 +13,7 @@ import {
   onSnapshot,
 } from "firebase/firestore";
 import { generateImages } from "../utils/openai";
+import { isSubscribedOrDevMode, getPromptsRemaining } from "../utils/devMode";
 
 const override = {
   display: "block",
@@ -72,7 +73,7 @@ const ImageGenerator = ({ setIsSubscribed }) => {
       const currentPrompts = userDoc.data().imagePrompts || 0;
       const isSubscribed = userDoc.data().isSubscribed || false;
 
-      if (currentPrompts >= 12 && !isSubscribed) {
+      if (currentPrompts >= 12 && !isSubscribedOrDevMode(isSubscribed)) {
         setIsSubscribed(false);
         toast.error(
           "You've reached your free limit. Please subscribe to continue!"
@@ -81,18 +82,22 @@ const ImageGenerator = ({ setIsSubscribed }) => {
         return;
       }
 
-      // Show warning when approaching limit
-      if (!isSubscribed && currentPrompts === 9) {
-        toast.warning(
-          "You have 3 free prompts remaining. Subscribe to get unlimited access!"
-        );
-      } else if (!isSubscribed && currentPrompts === 11) {
-        toast.warning(
-          "This is your last free prompt. Subscribe to continue generating images!"
-        );
+      // Show warning when approaching limit - only if not in dev mode or subscribed
+      if (!isSubscribedOrDevMode(isSubscribed)) {
+        const promptsRemaining = getPromptsRemaining(currentPrompts);
+        
+        if (promptsRemaining === 3) {
+          toast.warning(
+            "You have 3 free prompts remaining. Subscribe to get unlimited access!"
+          );
+        } else if (promptsRemaining === 1) {
+          toast.warning(
+            "This is your last free prompt. Subscribe to continue generating images!"
+          );
+        }
       }
 
-      // Update the imagePrompts counter in Firestore
+      // Update the imagePrompts counter in Firestore - still track usage even in dev mode
       await updateDoc(userDocRef, {
         imagePrompts: increment(1),
       });

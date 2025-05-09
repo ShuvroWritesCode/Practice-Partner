@@ -16,6 +16,7 @@ import {
   getDocs,
 } from "firebase/firestore";
 import { getChatCompletion } from "../utils/openai";
+import { isSubscribedOrDevMode, isDevMode, getPromptsRemaining } from "../utils/devMode";
 
 const Chat = ({ setIsSubscribed }) => {
   const containerRef = useRef(null);
@@ -46,7 +47,13 @@ const Chat = ({ setIsSubscribed }) => {
         const userRef = doc(db, "users", user.uid);
         const userSnap = await getDoc(userRef);
         const userData = userSnap.data();
-        setIsSubscribed(userData?.isSubscribed || false);
+        
+        // If in development mode, always set isSubscribed to true
+        if (isDevMode()) {
+          setIsSubscribed(true);
+        } else {
+          setIsSubscribed(userData?.isSubscribed || false);
+        }
 
         // Initialize chat session
         let sessionId = new URLSearchParams(location.search).get("session");
@@ -95,8 +102,13 @@ const Chat = ({ setIsSubscribed }) => {
     loadUserData();
   }, [navigate, location.search, setIsSubscribed]);
 
-  const handleSendMessage = async () => {
-    if (!inputMessage || !inputMessage.trim()) return;
+  const handleSendMessage = async (e) => {
+    // If e exists and is an event, prevent default behavior
+    if (e && e.preventDefault) {
+      e.preventDefault();
+    }
+    
+    if (!inputMessage.trim() || loading) return;
 
     try {
       const user = auth.currentUser;
@@ -110,8 +122,8 @@ const Chat = ({ setIsSubscribed }) => {
       const userSnap = await getDoc(userRef);
       const userData = userSnap.data();
 
-      // Check if user has available prompts
-      if (!userData.isSubscribed && userData.freePrompts <= 0) {
+      // Check if user has available prompts - use dev mode utility
+      if (!isDevMode() && !userData.isSubscribed && userData.freePrompts <= 0) {
         toast.error(
           "You've used all your free prompts. Please subscribe to continue."
         );
@@ -156,8 +168,11 @@ const Chat = ({ setIsSubscribed }) => {
 
       // Get response from OpenAI API
       try {
+        // Filter out any system messages from history before sending to API
+        // openai.js will add its own system message.
+        const historyForAPI = messages.filter(msg => msg.role === 'user' || msg.role === 'assistant');
         const responseText = await getChatCompletion([
-          ...messages,
+          ...historyForAPI,
           userMessage,
         ]);
 
@@ -180,21 +195,18 @@ const Chat = ({ setIsSubscribed }) => {
           updatedAt: serverTimestamp(),
         });
 
-        // If user is not subscribed, decrement free prompts
-        if (!userData.isSubscribed) {
+        // If user is not subscribed, decrement free prompts (but not in dev mode)
+        if (!isDevMode() && !userData.isSubscribed) {
+          const updatedPrompts = userData.freePrompts - 1;
           await updateDoc(userRef, {
-            freePrompts: userData.freePrompts - 1,
+            freePrompts: updatedPrompts,
           });
 
-          // Show warning if prompts are running low
-          if (userData.freePrompts <= 5) {
-            toast.warning(
-              `You have ${
-                userData.freePrompts - 1
-              } free prompts remaining. Subscribe to get unlimited access.`,
-              {
-                onClick: () => navigate("/plan"),
-              }
+          // Show remaining prompts notification
+          if (updatedPrompts <= 5) {
+            toast.info(
+              `You have ${updatedPrompts} free prompts remaining. Subscribe to get unlimited access.`,
+              { autoClose: 5000 }
             );
           }
         }
@@ -215,7 +227,7 @@ const Chat = ({ setIsSubscribed }) => {
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      handleSendMessage(); // This calls handleSendMessage without an event parameter
     }
   };
 

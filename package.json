@@ -16,7 +16,7 @@
     "axios": "^1.6.7",
     "cors-anywhere": "^0.4.4",
     "file-saver": "^2.0.5",
-    "firebase": "^10.10.0",
+    "firebase": "^10.14.1",
     "firebase-admin": "^12.0.0",
     "just-detect-adblock": "^1.1.0",
     "openai": "^4.78.1",

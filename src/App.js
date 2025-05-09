@@ -30,6 +30,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { toast } from "react-toastify";
 import { useNavigate } from "react-router-dom";
+import { isDevMode } from "./utils/devMode";
 
 function App() {
   const [email, setEmail] = useState(null);
@@ -40,6 +41,13 @@ function App() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (isDevMode()) {
+      console.log("Development mode active: Bypassing subscription checks");
+      setIsSubscribed(true);
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         const userRef = doc(db, "users", user.uid);
@@ -51,12 +59,10 @@ function App() {
           setEmailAddress(user.email);
           setIsAdmin(userData.isAdmin || false);
 
-          // Check subscription status
           const now = new Date();
           const endDate = userData.endDate?.toDate();
           const isExpired = endDate && now > endDate;
 
-          // Check if subscription is about to expire in 1 day
           const timeUntilExpiration = endDate
             ? endDate.getTime() - now.getTime()
             : null;
@@ -64,7 +70,6 @@ function App() {
             timeUntilExpiration && timeUntilExpiration <= 24 * 60 * 60 * 1000;
 
           if (isExpired) {
-            // Update user document when subscription expires
             await updateDoc(userRef, {
               isSubscribed: false,
               freePrompts: 0,
@@ -80,20 +85,21 @@ function App() {
             toast.warning(
               `Your subscription will expire in ${Math.ceil(
                 timeUntilExpiration / (1000 * 60 * 60 * 24)
-              )} day(s). Renew now to maintain access!`
+              )} days. Please renew to avoid service interruption.`
             );
             setIsSubscribed(userData.isSubscribed || false);
           } else {
             setIsSubscribed(userData.isSubscribed || false);
           }
         }
+        setLoading(false);
       } else {
-        setEmail("");
+        setEmail(null);
         setEmailAddress("");
         setIsAdmin(false);
         setIsSubscribed(false);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
