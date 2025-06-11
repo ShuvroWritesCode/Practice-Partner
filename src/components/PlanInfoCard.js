@@ -3,10 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import { toast } from "react-toastify";
 import { detectAnyAdblocker } from "just-detect-adblock";
+import axios from "axios"; // <--- NEW: Import axios for making API calls
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
-function PlanInfoCard({ planFeatures, isLoggedIn }) {
+// IMPORTANT: Ensure firebaseUserUid is passed as a prop from the component where Firebase Auth is managed.
+function PlanInfoCard({ planFeatures, isLoggedIn, firebaseUserUid }) {
   const [selectedPeriod, setSelectedPeriod] = useState("monthly");
   const [isLoading, setIsLoading] = useState(false);
   const [isAdBlockerDetected, setIsAdBlockerDetected] = useState(false);
@@ -21,7 +23,6 @@ function PlanInfoCard({ planFeatures, isLoggedIn }) {
         setIsAdBlockerDetected(isDetected);
 
         if (isDetected) {
-          // Show a more prominent warning message
           toast.error(
             "⚠️ Ad Blocker Detected! Payment processing requires disabling your ad-blocker or whitelisting our website. Please update your settings to continue.",
             {
@@ -52,7 +53,7 @@ function PlanInfoCard({ planFeatures, isLoggedIn }) {
     // Run the check immediately
     checkForAdBlocker();
 
-    // Also run it after a short delay to ensure proper detection
+    // Also run it after a short delay to ensure proper detection (optional, but can help)
     const timeoutId = setTimeout(checkForAdBlocker, 1000);
 
     return () => clearTimeout(timeoutId);
@@ -76,13 +77,20 @@ function PlanInfoCard({ planFeatures, isLoggedIn }) {
   };
 
   const handleSubscribe = async () => {
+    // 1. Check if user is logged in
     if (!isLoggedIn) {
       navigate("/login");
       return;
     }
 
+    // 2. Ensure Firebase UID is available for backend
+    if (!firebaseUserUid) {
+      toast.error("User ID not available. Please log in again.");
+      return;
+    }
+
+    // 3. Check for ad blocker before proceeding with payment
     if (isAdBlockerDetected) {
-      // Show a more prominent subscription blocked message
       toast.error(
         "🛑 Subscription Blocked: Please disable your ad-blocker or whitelist our website first.",
         {
@@ -104,30 +112,40 @@ function PlanInfoCard({ planFeatures, isLoggedIn }) {
       return;
     }
 
-    setIsLoading(true);
+    setIsLoading(true); // Set loading state to true
 
     try {
-      const stripe = await stripePromise;
-      if (!stripe) {
-        throw new Error("Stripe failed to initialize");
-      }
-
+      // Get the Stripe Price ID based on the selected period
       const priceId = getPriceId(selectedPeriod);
-      const { error } = await stripe.redirectToCheckout({
-        lineItems: [{ price: priceId, quantity: 1 }],
-        mode: "subscription",
-        successUrl: `${window.location.origin}/payment-success?session_id={CHECKOUT_SESSION_ID}&payment_type=${selectedPeriod}`,
-        cancelUrl: `${window.location.origin}/plan`,
+
+      // Define your backend URL (from .env.local)
+      const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+
+      // Make an API call to your Express.js backend to create the Stripe Checkout Session
+      const response = await axios.post(`${BACKEND_URL}/create-checkout-session`, {
+        priceId: priceId,
+        userId: firebaseUserUid, // Pass the Firebase user's UID to your backend
       });
 
-      if (error) {
-        throw error;
+      // Check for errors returned by your backend
+      if (response.data.error) {
+        throw new Error(response.data.error);
       }
+
+      // Ensure the backend returned a session URL
+      if (!response.data.url) {
+        throw new Error("No checkout URL received from backend.");
+      }
+
+      // Redirect the user to the Stripe Checkout page
+      // Stripe recommends using window.location.href for redirection when you have the session.url
+      window.location.href = response.data.url;
+
     } catch (error) {
-      console.error("Error:", error);
-      toast.error("Failed to initiate checkout. Please try again.");
+      console.error("Error initiating checkout:", error);
+      toast.error(`Failed to initiate checkout: ${error.message || "Please try again."}`);
     } finally {
-      setIsLoading(false);
+      setIsLoading(false); // Reset loading state
     }
   };
 
@@ -151,50 +169,44 @@ function PlanInfoCard({ planFeatures, isLoggedIn }) {
       <header className="flex flex-col w-full text-center text-sky-700 md:max-w-[808px] max-md:max-w-full">
         <div className="flex gap-3 justify-center py-3 px-2 text-2xl leading-8 whitespace-nowrap bg-sky-50 rounded-xl max-md:flex-wrap max-md:max-w-full">
           <div
-            className={`flex flex-col flex-1 justify-center font-bold ${
-              selectedPeriod === "monthly" ? "text-slate-50" : "text-secondary"
-            }`}
+            className={`flex flex-col flex-1 justify-center font-bold ${selectedPeriod === "monthly" ? "text-slate-50" : "text-secondary"
+              }`}
           >
             <button
-              className={`justify-center px-16 py-5 rounded-xl max-md:px-5 ${
-                selectedPeriod === "monthly"
+              className={`justify-center px-16 py-5 rounded-xl max-md:px-5 ${selectedPeriod === "monthly"
                   ? "bg-primary"
                   : "bg-secondary-container"
-              }`}
+                }`}
               onClick={() => handleClick("monthly")}
             >
               Monthly
             </button>
           </div>
           <div
-            className={`flex flex-col flex-1 justify-center font-bold ${
-              selectedPeriod === "biannually"
+            className={`flex flex-col flex-1 justify-center font-bold ${selectedPeriod === "biannually"
                 ? "text-slate-50"
                 : "text-secondary"
-            }`}
+              }`}
           >
             <button
-              className={`justify-center px-14 py-5 rounded-xl max-md:px-5 ${
-                selectedPeriod === "biannually"
+              className={`justify-center px-14 py-5 rounded-xl max-md:px-5 ${selectedPeriod === "biannually"
                   ? "bg-primary"
                   : "bg-secondary-container"
-              }`}
+                }`}
               onClick={() => handleClick("biannually")}
             >
               Bi-Annually
             </button>
           </div>
           <div
-            className={`flex flex-col flex-1 justify-center font-bold ${
-              selectedPeriod === "annually" ? "text-slate-50" : "text-secondary"
-            }`}
+            className={`flex flex-col flex-1 justify-center font-bold ${selectedPeriod === "annually" ? "text-slate-50" : "text-secondary"
+              }`}
           >
             <button
-              className={`justify-center items-center px-16 py-5 rounded-xl max-md:px-5 ${
-                selectedPeriod === "annually"
+              className={`justify-center items-center px-16 py-5 rounded-xl max-md:px-5 ${selectedPeriod === "annually"
                   ? "bg-primary"
                   : "bg-secondary-container"
-              }`}
+                }`}
               onClick={() => handleClick("annually")}
             >
               Annually
@@ -253,11 +265,10 @@ function PlanInfoCard({ planFeatures, isLoggedIn }) {
               <button
                 onClick={handleSubscribe}
                 disabled={isLoading || isAdBlockerDetected}
-                className={`justify-center items-center px-16 py-5 mt-2 text-base font-bold whitespace-nowrap bg-sky-700 rounded-xl text-slate-50 max-md:px-5 ${
-                  isLoading || isAdBlockerDetected
+                className={`justify-center items-center px-16 py-5 mt-2 text-base font-bold whitespace-nowrap bg-sky-700 rounded-xl text-slate-50 max-md:px-5 ${isLoading || isAdBlockerDetected
                     ? "opacity-50 cursor-not-allowed"
                     : "hover:bg-sky-800"
-                }`}
+                  }`}
               >
                 {isLoading ? "Processing..." : "Subscribe"}
               </button>

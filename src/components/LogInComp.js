@@ -13,7 +13,6 @@ const LogInComp = ({
   setEmail,
   setEmailAddress,
   setIsAdmin,
-  setIsSubscribed,
 }) => {
   const [formData, setFormData] = useState({
     email: "",
@@ -45,7 +44,7 @@ const LogInComp = ({
       }
 
       const userData = userDoc.data();
-      setIsSubscribed(userData.isSubscribed);
+      // setIsSubscribed(userData.isSubscribed);
       setEmail(true);
       setIsAdmin(userData.isAdmin);
       setEmailAddress(userData.email);
@@ -88,7 +87,7 @@ const LogInComp = ({
       }
 
       const userData = userDoc.data();
-      setIsSubscribed(userData.isSubscribed);
+      // setIsSubscribed(userData.isSubscribed);
       setEmail(true);
       setIsAdmin(userData.isAdmin);
       setEmailAddress(userData.email);

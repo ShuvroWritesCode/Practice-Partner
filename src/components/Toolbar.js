@@ -3,10 +3,15 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { auth } from "../utlis/firebase";
 import { signOut } from "firebase/auth";
 import { toast } from "react-toastify";
+import { useAuth } from "../contexts/AuthContext"; // <--- IMPORT useAuth here
 
-const Toolbar = ({ setEmail, isAdmin, setIsAdmin, setEmailAddress }) => {
+// <--- REMOVE all props here
+const Toolbar = () => {
   const location = useLocation();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  // <--- GET STATE FROM CONTEXT
+  const { user, email, isAdmin, subscriptionInfo } = useAuth(); // Access user, email, isAdmin from context
 
   const toggleDrawer = () => {
     setIsDrawerOpen(!isDrawerOpen);
@@ -24,26 +29,29 @@ const Toolbar = ({ setEmail, isAdmin, setIsAdmin, setEmailAddress }) => {
     "/privacy-policy",
     "/upgrade-plan",
     "/termsofuse",
+    // Add payment success/cancel pages if toolbar shouldn't show there
+    "/payment-success",
+    "/payment-cancel",
   ];
 
   const shouldHideToolbar = pathsToHideToolbar.includes(location.pathname);
   const navigate = useNavigate();
 
   if (shouldHideToolbar) {
-    return null; // Return null to hide the toolbar
+    return null; // Return null to hide the toolbar on specified paths
   }
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      setIsAdmin(false);
-      setEmail(false);
-      setEmailAddress("");
+      // No need to manually set states like setIsAdmin(false), setEmail(false), setEmailAddress("").
+      // The onAuthStateChanged listener in AuthContext.js will automatically update
+      // the 'user' and other related states (email, isAdmin) in the context.
       toast.success("Logged out successfully");
-      navigate("/");
+      navigate("/"); // Navigate to home or login page after logout
     } catch (error) {
       console.error("Error during logout:", error.message);
-      toast.error("Error logging out. Please try again.");
+      toast.error("Failed to log out.");
     }
   };
 
@@ -479,9 +487,8 @@ const Toolbar = ({ setEmail, isAdmin, setIsAdmin, setEmailAddress }) => {
         )}
         <hr className=" border-white" />
         <div
-          className={`flex items-center hover:bg-on-surface rounded-2xl px-2 py-1 mr-2 ${
-            isAdmin ? "md:mt-56 sm:mt-6" : ""
-          }`}
+          className={`flex items-center hover:bg-on-surface rounded-2xl px-2 py-1 mr-2 ${isAdmin ? "md:mt-56 sm:mt-6" : ""
+            }`}
         >
           <svg
             className="w-5 h-5"

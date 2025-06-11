@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom"; // Ensure useSearchParams is imported
 import { PropagateLoader } from "react-spinners";
 import { toast } from "react-toastify";
 import { auth, db } from "../utlis/firebase";
@@ -16,9 +16,10 @@ import {
   getDocs,
 } from "firebase/firestore";
 import { getChatCompletion } from "../utils/openai";
-import { isSubscribedOrDevMode, isDevMode, getPromptsRemaining } from "../utils/devMode";
+import { isDevMode } from "../utils/devMode";
 
-const Chat = ({ setIsSubscribed }) => {
+// Accept subscriptionInfo as a prop
+const Chat = ({ subscriptionInfo }) => {
   const containerRef = useRef(null);
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState("");
@@ -27,6 +28,7 @@ const Chat = ({ setIsSubscribed }) => {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams(); // Initialize useSearchParams
 
   // Add this new function to format the message content
   const formatMessage = (content) => {
@@ -43,20 +45,29 @@ const Chat = ({ setIsSubscribed }) => {
           return;
         }
 
-        // Get user document
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        const userData = userSnap.data();
-        
-        // If in development mode, always set isSubscribed to true
-        if (isDevMode()) {
-          setIsSubscribed(true);
-        } else {
-          setIsSubscribed(userData?.isSubscribed || false);
+        // --- Payment Success Notification Handling ---
+        const paymentStatus = searchParams.get("payment_status");
+        if (paymentStatus === "success") {
+          toast.success('🎉 Your subscription was successful! Welcome aboard.', {
+            position: 'top-right',
+            autoClose: 5000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true,
+          });
+
+          // Clean up the URL: Remove the query parameters
+          // This prevents the toast from reappearing if the user refreshes
+          const newSearchParams = new URLSearchParams(searchParams);
+          newSearchParams.delete("payment_status");
+          newSearchParams.delete("session_id"); // Assuming session_id is also passed
+          setSearchParams(newSearchParams, { replace: true }); // Use replace: true for cleaner history
         }
+        // --- End Payment Success Notification Handling ---
 
         // Initialize chat session
-        let sessionId = new URLSearchParams(location.search).get("session");
+        let sessionId = searchParams.get("session"); // Use searchParams for session as well
         if (!sessionId) {
           // Create a new chat session
           const sessionsRef = collection(
@@ -70,7 +81,8 @@ const Chat = ({ setIsSubscribed }) => {
             updatedAt: serverTimestamp(),
           });
           sessionId = newSessionRef.id;
-          navigate(`/chat?session=${sessionId}`);
+          // Use replace: true here too to avoid adding a new history entry if already on /chat
+          navigate(`/chat?session=${sessionId}`, { replace: true });
         }
         setCurrentSessionId(sessionId);
 
@@ -100,36 +112,43 @@ const Chat = ({ setIsSubscribed }) => {
     };
 
     loadUserData();
-  }, [navigate, location.search, setIsSubscribed]);
+  }, [navigate, location.search, searchParams, setSearchParams, subscriptionInfo]); // Added searchParams and setSearchParams to dependencies
 
   const handleSendMessage = async (e) => {
     // If e exists and is an event, prevent default behavior
     if (e && e.preventDefault) {
       e.preventDefault();
     }
-    
+
     if (!inputMessage.trim() || loading) return;
 
     try {
       const user = auth.currentUser;
       if (!user) {
         toast.error("Please log in to continue");
+        navigate("/login");
         return;
       }
 
-      // Get user document to check prompts
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-      const userData = userSnap.data();
+      // --- NEW SUBSCRIPTION LOGIC ---
+      const { hasAccess, status, prompts } = subscriptionInfo; // Destructure from prop
 
-      // Check if user has available prompts - use dev mode utility
-      if (!isDevMode() && !userData.isSubscribed && userData.freePrompts <= 0) {
-        toast.error(
-          "You've used all your free prompts. Please subscribe to continue."
-        );
+      // Check if user has available prompts
+      if (!hasAccess) {
+        // If hasAccess is false, determine the reason from status and prompts
+        if (status === 'free' && prompts <= 0) {
+          toast.error("You've used all your free prompts. Please subscribe to continue.");
+        } else if (status === 'past_due') {
+          toast.error("Your payment is past due. Please update your payment method to continue.");
+        } else if (status === 'canceled') {
+          toast.error("Your subscription is canceled. Please renew to continue!");
+        } else {
+          toast.error("You do not have access to this feature. Please subscribe.");
+        }
         navigate("/plan");
         return;
       }
+      // --- END NEW SUBSCRIPTION LOGIC ---
 
       const trimmedMessage = inputMessage.trim();
       setLoading(true);
@@ -195,19 +214,29 @@ const Chat = ({ setIsSubscribed }) => {
           updatedAt: serverTimestamp(),
         });
 
-        // If user is not subscribed, decrement free prompts (but not in dev mode)
-        if (!isDevMode() && !userData.isSubscribed) {
-          const updatedPrompts = userData.freePrompts - 1;
+        // Decrement free prompts if user is on the free tier (status is 'free')
+        if (status === 'free') {
+          const userRef = doc(db, "users", user.uid); // Need to get userRef if not already available
           await updateDoc(userRef, {
-            freePrompts: updatedPrompts,
+            freePrompts: increment(-1), // Decrement by 1
           });
 
-          // Show remaining prompts notification
-          if (updatedPrompts <= 5) {
+          // Show remaining prompts notification based on updated `prompts`
+          // Note: `prompts` here from `subscriptionInfo` might not be immediately updated after decrement.
+          // For real-time display of remaining prompts, you might need a local state or another onSnapshot
+          // specifically for `freePrompts` if it's critical to display immediately.
+          // However, for consistency with the prompt limits, relying on `subscriptionInfo.prompts` from App.js is better.
+          // If you need immediate visual feedback on decrement, you might temporarily update a local state or refetch.
+          // For now, we'll use the pre-decrement `prompts` for the message.
+          const currentPromptsDisplay = prompts - 1; // Reflects what it will be after this transaction
+          if (currentPromptsDisplay <= 5 && currentPromptsDisplay >= 0) {
             toast.info(
-              `You have ${updatedPrompts} free prompts remaining. Subscribe to get unlimited access.`,
+              `You have ${currentPromptsDisplay} free prompts remaining. Subscribe to get unlimited access.`,
               { autoClose: 5000 }
             );
+          } else if (currentPromptsDisplay < 0) {
+            // Should not happen if the check above worked, but as a safeguard
+            toast.info("You've used all your free prompts!");
           }
         }
       } catch (aiError) {
@@ -256,11 +285,10 @@ const Chat = ({ setIsSubscribed }) => {
             {messages.map((message, index) => (
               <div key={index}>
                 <div
-                  className={`flex items-center px-4 py-2 ${
-                    message.role === "user"
-                      ? "bg-on-primary-container"
-                      : "bg-secondary"
-                  }`}
+                  className={`flex items-center px-4 py-2 ${message.role === "user"
+                    ? "bg-on-primary-container"
+                    : "bg-secondary"
+                    }`}
                 >
                   <img
                     src={
@@ -270,9 +298,8 @@ const Chat = ({ setIsSubscribed }) => {
                     className="w-8 h-8 rounded-full mr-2"
                   />
                   <div
-                    className={`bg-transparent text-white p-2 ${
-                      message.role === "assistant" ? "whitespace-pre-wrap" : ""
-                    }`}
+                    className={`bg-transparent text-white p-2 ${message.role === "assistant" ? "whitespace-pre-wrap" : ""
+                      }`}
                     dangerouslySetInnerHTML={{
                       __html: formatMessage(message.content),
                     }}

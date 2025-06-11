@@ -2,7 +2,7 @@ import "./App.css";
 import FooterNavbar from "./components/FooterNavbar";
 import Navbar from "./components/Navbar";
 import Toolbar from "./components/Toolbar";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom"; // Added useLocation, useNavigate
 import AboutUs from "./pages/AboutUs";
 import Home from "./pages/Home";
 import Features from "./pages/Features";
@@ -20,91 +20,75 @@ import UserManagement from "./pages/UserManagement.js";
 import AIconfiguration from "./pages/AIconfiguration.js";
 import PlanUpgradePrompt from "./pages/PlanUpgradePrompt.js";
 import Plan from "./pages/Plan.js";
-import PaymentSuccess from "./pages/PaymentSuccess";
-import { useEffect, useState } from "react";
+import SuccessPage from "./pages/Success";
+import CancelPage from "./pages/Cancel";
+import { useEffect } from "react"; // Only useEffect needed now
 import { PropagateLoader } from "react-spinners";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import { auth, db } from "./utlis/firebase";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { toast } from "react-toastify";
-import { useNavigate } from "react-router-dom";
-import { isDevMode } from "./utils/devMode";
 
-function App() {
-  const [email, setEmail] = useState(null);
-  const [emailAddress, setEmailAddress] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isSubscribed, setIsSubscribed] = useState(false);
+// Import AuthProvider and useAuth from the new context file
+import { AuthProvider, useAuth } from './contexts/AuthContext'; //
+
+// ProtectedRoute component to manage access based on auth and subscription status
+const ProtectedRoute = ({ children, requireAuth = true, requireAdmin = false, requireSubscribed = false }) => {
+  const { user, loading, isAdmin, isSubscribed } = useAuth(); //
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="bg-primary-container flex justify-center items-center h-svh">
+        <PropagateLoader color="#006590" loading={true} size={15} />
+      </div>
+    ); // Show loading spinner while auth and user data loads
+  }
+
+  if (requireAuth && !user) {
+    return <Navigate to="/login" state={{ from: location }} replace />; // Redirect to login if not authenticated
+  }
+
+  if (requireAdmin && !isAdmin) {
+    return <Navigate to="/" replace />; // Redirect if admin access is required but user is not admin
+  }
+
+  if (requireSubscribed && !isSubscribed) {
+    return <Navigate to="/plans" state={{ from: location }} replace />; // Redirect to plans if subscription is required
+  }
+
+  return children; // Render the children component if conditions are met
+};
+
+// Main App Content component that uses the AuthContext
+function AppContent() {
+  const { loading, user, email, emailAddress, isAdmin, isSubscribed, subscriptionInfo } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
 
+  // Handle Stripe redirect on success
   useEffect(() => {
-    if (isDevMode()) {
-      console.log("Development mode active: Bypassing subscription checks");
-      setIsSubscribed(true);
-      setLoading(false);
-      return;
-    }
+    const queryParams = new URLSearchParams(location.search);
+    const paymentStatus = queryParams.get('payment_status');
+    const sessionId = queryParams.get('session_id');
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
+    if (paymentStatus === 'success' && sessionId) {
+      // Clear query params after handling to prevent re-triggering on refresh
+      const cleanUrl = location.pathname;
+      navigate(cleanUrl, { replace: true }); // Remove query params from URL history
 
-        if (userSnap.exists()) {
-          const userData = userSnap.data();
-          setEmail(user.email);
-          setEmailAddress(user.email);
-          setIsAdmin(userData.isAdmin || false);
-
-          const now = new Date();
-          const endDate = userData.endDate?.toDate();
-          const isExpired = endDate && now > endDate;
-
-          const timeUntilExpiration = endDate
-            ? endDate.getTime() - now.getTime()
-            : null;
-          const isAboutToExpire =
-            timeUntilExpiration && timeUntilExpiration <= 24 * 60 * 60 * 1000;
-
-          if (isExpired) {
-            await updateDoc(userRef, {
-              isSubscribed: false,
-              freePrompts: 0,
-              status: "inactive",
-              updatedAt: now,
-            });
-
-            setIsSubscribed(false);
-            toast.error(
-              "Your subscription has expired. Please renew to continue accessing premium features."
-            );
-          } else if (isAboutToExpire) {
-            toast.warning(
-              `Your subscription will expire in ${Math.ceil(
-                timeUntilExpiration / (1000 * 60 * 60 * 24)
-              )} days. Please renew to avoid service interruption.`
-            );
-            setIsSubscribed(userData.isSubscribed || false);
-          } else {
-            setIsSubscribed(userData.isSubscribed || false);
-          }
-        }
-        setLoading(false);
-      } else {
-        setEmail(null);
-        setEmailAddress("");
-        setIsAdmin(false);
-        setIsSubscribed(false);
-        setLoading(false);
+      // If user is authenticated and not loading, redirect directly to chat
+      // The AuthProvider will handle the state update after a successful payment webhook
+      if (user && !loading) {
+        navigate('/chat', { replace: true }); // Redirect to chat
+      } else if (!loading) {
+        // This case should ideally not be hit if Firebase persistence is working well.
+        // It means payment was successful but user is not logged in after reload.
+        console.warn("Payment success, but user not immediately available. Ensure Firebase Auth persistence is working or prompt re-login.");
+        // You might want to redirect to login or show a specific message here
       }
-    });
+    }
+  }, [location.search, user, loading, navigate, location.pathname]); // Dependencies for useEffect
 
-    return () => unsubscribe();
-  }, []);
-
+  // Show a global loading indicator while authentication and user data are being loaded
   if (loading) {
     return (
       <div className="bg-primary-container flex justify-center items-center h-svh">
@@ -115,20 +99,10 @@ function App() {
 
   return (
     <div className="bg-primary-container min-h-screen flex flex-col ">
-      <ToastContainer />
-      <Navbar
-        loggedIn={email}
-        setEmail={setEmail}
-        setIsAdmin={setIsAdmin}
-        setEmailAddress={setEmailAddress}
-      />
+      <ToastContainer position="bottom-right" autoClose={5000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover theme="colored" />
+      <Navbar />
       <div className="flex max-md:flex-col h-full pl-2">
-        <Toolbar
-          setEmail={setEmail}
-          isAdmin={isAdmin}
-          setIsAdmin={setIsAdmin}
-          setEmailAddress={setEmailAddress}
-        />
+        <Toolbar />
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Home />} />
@@ -140,26 +114,21 @@ function App() {
           <Route path="/termsofuse" element={<TermsofUse />} />
           <Route
             path="/plan"
-            element={<Plan isLoggedIn={email} emailAddress={emailAddress} />}
+            element={<Plan isLoggedIn={user ? true : false} emailAddress={emailAddress} />} // Use user for isLoggedIn
           />
 
-          {/* Auth routes */}
+          {/* Auth routes - redirect if already logged in */}
           <Route
             path="/signup"
-            element={email ? <Navigate to="/" /> : <SignUp />}
+            element={user ? <Navigate to="/" /> : <SignUp />} // Use user from context
           />
           <Route
             path="/login"
             element={
-              email ? (
+              user ? ( // Use user from context
                 <Navigate to="/" />
               ) : (
-                <LogIn
-                  setEmail={setEmail}
-                  setEmailAddress={setEmailAddress}
-                  setIsAdmin={setIsAdmin}
-                  setIsSubscribed={setIsSubscribed}
-                />
+                <LogIn />
               )
             }
           />
@@ -168,50 +137,59 @@ function App() {
           <Route
             path="/generate-image"
             element={
-              email ? (
-                <ImageGenerator setIsSubscribed={setIsSubscribed} />
-              ) : (
-                <Navigate to="/login" />
-              )
+              <ProtectedRoute requireAuth={true} requireSubscribed={true}> {/* Require subscription for Image Generator */}
+                <ImageGenerator subscriptionInfo={subscriptionInfo} />
+              </ProtectedRoute>
             }
           />
           <Route
             path="/chat"
             element={
-              email ? (
-                <Chat setIsSubscribed={setIsSubscribed} />
-              ) : (
-                <Navigate to="/login" />
-              )
+              <ProtectedRoute requireAuth={true}>
+                <Chat subscriptionInfo={subscriptionInfo} />
+              </ProtectedRoute>
             }
           />
           <Route
             path="/account"
-            element={email ? <Account /> : <Navigate to="/login" />}
+            element={<ProtectedRoute requireAuth={true}><Account /></ProtectedRoute>}
           />
 
           {/* Admin routes */}
           <Route
             path="/user-management"
-            element={isAdmin ? <UserManagement /> : <Navigate to="/" />}
+            element={<ProtectedRoute requireAdmin={true}><UserManagement /></ProtectedRoute>}
           />
           <Route
             path="/ai-configuration"
-            element={isAdmin ? <AIconfiguration /> : <Navigate to="/" />}
+            element={<ProtectedRoute requireAdmin={true}><AIconfiguration /></ProtectedRoute>}
           />
           <Route path="/upgrade-plan" element={<PlanUpgradePrompt />} />
 
           {/* Add History route */}
           <Route
             path="/history"
-            element={email ? <History /> : <Navigate to="/login" />}
+            element={<ProtectedRoute requireAuth={true}><History /></ProtectedRoute>}
           />
 
-          <Route path="/payment-success" element={<PaymentSuccess />} />
+          {/* Routes for Stripe redirects - can be simple display pages */}
+          <Route path="/payment-success" element={<SuccessPage />} />
+          <Route path="/payment-cancel" element={<CancelPage />} />
         </Routes>
       </div>
       <FooterNavbar />
     </div>
+  );
+}
+
+// Wrap the entire application with AuthProvider
+function App() {
+  return (
+    <Router>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </Router>
   );
 }
 

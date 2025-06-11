@@ -1,7 +1,25 @@
-import { useState } from "react";
+import React, { useState, useEffect } from "react"; // <--- Add useEffect here
+import { getAuth, onAuthStateChanged } from "firebase/auth"; // <--- NEW: Import Firebase Auth functions
 import PlanInfoCard from "../components/PlanInfoCard";
 
 const Plan = ({ isLoggedIn }) => {
+  // State to hold the Firebase user object
+  const [user, setUser] = useState(null);
+  const auth = getAuth(); // Initialize Firebase Auth
+
+  // Effect to listen for Firebase Auth state changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser); // Update the user state
+      // The isLoggedIn prop is already passed, so no need to update it here unless
+      // you want Plan component to strictly manage its own isLoggedIn state based on Firebase.
+      // For now, we'll assume isLoggedIn prop comes from an even higher parent or context.
+    });
+
+    // Cleanup subscription on component unmount
+    return () => unsubscribe();
+  }, [auth]); // Re-run effect if auth instance changes (though it typically won't)
+
   const planFeatures = [
     {
       icon: "https://cdn.builder.io/api/v1/image/assets/TEMP/bec32ef0adf8fc7537a8f83e965d41ef4ff6e36dd1877c1f65671cc33c0f6c73?apiKey=9a29bea2c99f43cc9fe59f79b667536e&",
@@ -45,7 +63,11 @@ const Plan = ({ isLoggedIn }) => {
         </div>
       </section>
       <div className="flex justify-center">
-        <PlanInfoCard planFeatures={planFeatures} isLoggedIn={isLoggedIn} />
+        <PlanInfoCard
+          planFeatures={planFeatures}
+          isLoggedIn={isLoggedIn}
+          firebaseUserUid={user ? user.uid : null}
+        />
       </div>
     </div>
   );

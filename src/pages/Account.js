@@ -4,6 +4,7 @@ import { toast } from "react-toastify";
 import { useNavigate } from "react-router-dom";
 import { auth, db } from "../utlis/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { PropagateLoader } from "react-spinners";
 
 function TextInputField({ label, id, type = "text", value, onChange }) {
   return (
@@ -28,14 +29,18 @@ function PlanDetails({ plan, startDate, endDate }) {
   const formatDate = (date) => {
     if (!date) return "";
     // Check if date is a Firestore Timestamp
-    if (date && date.toDate) {
+    if (date && typeof date.toDate === 'function') { // More robust check for Timestamp
       date = date.toDate();
     }
-    return new Date(date).toLocaleDateString("en-US", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+    // Ensure it's a valid Date object before formatting
+    if (date instanceof Date && !isNaN(date)) {
+      return new Date(date).toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+    }
+    return ""; // Return empty string if date is not valid
   };
 
   return (
@@ -145,11 +150,13 @@ function AccountCancellationInfo() {
   );
 }
 
-function Account() {
+// Accept subscriptionInfo as a prop
+function Account({ subscriptionInfo }) {
   const [pageLoading, setPageLoading] = useState(true);
-  const [subscriptionTerm, setSubscriptionTerm] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  // REMOVE: subscriptionTerm, startDate, endDate states as they will come from props
+  // const [subscriptionTerm, setSubscriptionTerm] = useState("");
+  // const [startDate, setStartDate] = useState("");
+  // const [endDate, setEndDate] = useState("");
   const [businessName, setBusinessName] = useState("");
   const [industry, setIndustry] = useState("");
   const [additionalInfo, setAdditionalInfo] = useState("");
@@ -170,24 +177,25 @@ function Account() {
         if (userDoc.exists()) {
           const userData = userDoc.data();
 
-          // Set subscription data
-          if (!userData.isSubscribed) {
-            setSubscriptionTerm("Not subscribed");
-            setStartDate("");
-            setEndDate("");
-          } else {
-            setSubscriptionTerm(userData.subscriptionTerm || "Premium");
-            setStartDate(userData.startDate || "");
-            setEndDate(userData.endDate || "");
-          }
+          // REMOVED: Subscription data setting from here.
+          // It will now come from the subscriptionInfo prop.
+          // if (!userData.isSubscribed) {
+          //   setSubscriptionTerm("Not subscribed");
+          //   setStartDate("");
+          //   setEndDate("");
+          // } else {
+          //   setSubscriptionTerm(userData.subscriptionTerm || "Premium");
+          //   setStartDate(userData.startDate || "");
+          //   setEndDate(userData.endDate || "");
+          // }
 
-          // Set business details
+          // Set business details (these are still specific to this component)
           setBusinessName(userData.businessName || "");
           setIndustry(userData.industry || "");
           setAdditionalInfo(userData.additionalInfo || "");
         } else {
           toast.error("User data not found");
-          navigate("/login");
+          // navigate("/login"); // Consider if you want to navigate directly or just show error
         }
       } catch (error) {
         console.error("Error fetching profile info:", error);
@@ -198,6 +206,8 @@ function Account() {
     };
 
     fetchProfileInfo();
+    // Add subscriptionInfo to dependencies if you want re-fetch of profile info
+    // when subscriptionInfo changes (though not strictly necessary if only business details are here)
   }, [navigate]);
 
   const handleSave = async (e) => {
@@ -223,6 +233,15 @@ function Account() {
       toast.error("Failed to save business details");
     }
   };
+
+  // Render loading state if business details are still loading
+  if (pageLoading) {
+    return (
+      <div className="bg-primary-container w-full flex justify-center items-center h-svh">
+        <PropagateLoader color="#006590" loading={true} size={15} /> {/* Assuming PropagateLoader is available */}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col space-y-8 md:pl-12 p-4 mb-4">
@@ -280,9 +299,10 @@ function Account() {
       </form>
       <div className="my-8 mb-12">
         <PlanDetails
-          plan={subscriptionTerm}
-          startDate={startDate}
-          endDate={endDate}
+          // Use subscriptionInfo from props
+          plan={subscriptionInfo?.plan || "Not subscribed"}
+          startDate={subscriptionInfo?.startDate || ""}
+          endDate={subscriptionInfo?.endDate || ""}
         />
       </div>
       <div>
