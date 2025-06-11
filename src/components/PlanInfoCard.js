@@ -119,7 +119,7 @@ function PlanInfoCard({ planFeatures, isLoggedIn, firebaseUserUid }) {
       const priceId = getPriceId(selectedPeriod);
 
       // Define your backend URL (from .env.local)
-      const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+      const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
       // Make an API call to your Express.js backend to create the Stripe Checkout Session
       const response = await axios.post(`${BACKEND_URL}/create-checkout-session`, {
@@ -174,8 +174,8 @@ function PlanInfoCard({ planFeatures, isLoggedIn, firebaseUserUid }) {
           >
             <button
               className={`justify-center px-16 py-5 rounded-xl max-md:px-5 ${selectedPeriod === "monthly"
-                  ? "bg-primary"
-                  : "bg-secondary-container"
+                ? "bg-primary"
+                : "bg-secondary-container"
                 }`}
               onClick={() => handleClick("monthly")}
             >
@@ -184,14 +184,14 @@ function PlanInfoCard({ planFeatures, isLoggedIn, firebaseUserUid }) {
           </div>
           <div
             className={`flex flex-col flex-1 justify-center font-bold ${selectedPeriod === "biannually"
-                ? "text-slate-50"
-                : "text-secondary"
+              ? "text-slate-50"
+              : "text-secondary"
               }`}
           >
             <button
               className={`justify-center px-14 py-5 rounded-xl max-md:px-5 ${selectedPeriod === "biannually"
-                  ? "bg-primary"
-                  : "bg-secondary-container"
+                ? "bg-primary"
+                : "bg-secondary-container"
                 }`}
               onClick={() => handleClick("biannually")}
             >
@@ -204,8 +204,8 @@ function PlanInfoCard({ planFeatures, isLoggedIn, firebaseUserUid }) {
           >
             <button
               className={`justify-center items-center px-16 py-5 rounded-xl max-md:px-5 ${selectedPeriod === "annually"
-                  ? "bg-primary"
-                  : "bg-secondary-container"
+                ? "bg-primary"
+                : "bg-secondary-container"
                 }`}
               onClick={() => handleClick("annually")}
             >
@@ -266,8 +266,8 @@ function PlanInfoCard({ planFeatures, isLoggedIn, firebaseUserUid }) {
                 onClick={handleSubscribe}
                 disabled={isLoading || isAdBlockerDetected}
                 className={`justify-center items-center px-16 py-5 mt-2 text-base font-bold whitespace-nowrap bg-sky-700 rounded-xl text-slate-50 max-md:px-5 ${isLoading || isAdBlockerDetected
-                    ? "opacity-50 cursor-not-allowed"
-                    : "hover:bg-sky-800"
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:bg-sky-800"
                   }`}
               >
                 {isLoading ? "Processing..." : "Subscribe"}
